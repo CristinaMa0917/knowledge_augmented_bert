@@ -1,0 +1,19 @@
+rm /mnt/d/code/text_bert_pretrain/text_bert_pretrain.tar.gz
+tar -czf text_bert_pretrain.tar.gz ./configs ./data_dumper ./data_loader ./main ./model ./trainer ./util ./resources
+
+CHECKPOINT_PATH=text_bert_pretrain/finetune/unify_dense_before_cate_99w_longer_query
+STEP=20001
+INPUT=bg_bert_half_month_test_20
+OUTPUT=bg_bert_half_seq_pred2
+echo "Checkpoint : ${CHECKPOINT_PATH}; STEP = ${STEP}, OUTPUT:${OUTPUT}"
+
+odpscmd -e "pai \
+        -name tensorflow140 -project algo_public_dev \
+        -Dscript=\"file://`pwd`/text_bert_pretrain.tar.gz\" \
+        -Dtables=\"odps://college_corp_dev/tables/$INPUT\" \
+        -Doutputs=\"odps://college_corp_dev/tables/$OUTPUT\" \
+        -DentryFile=\"main/finetune_inference.py\" \
+        -Dbuckets=\"oss://one-graph/?host=cn-zhangjiakou.oss-internal.aliyun-inc.com\&role_arn=acs:ram::1459115138698067:role/manxiu\" \
+        -DuserDefinedParameters='--checkpoint_dir=manxiu/models/$CHECKPOINT_PATH --step=$STEP' \
+        -Dcluster='{\"worker\":{\"count\":8,\"cpu\":200,\"memory\":4096,\"gpu\":50}}' \
+        "
