@@ -1,5 +1,6 @@
 # knowledge_augmented_bert
 
+PS: text here means search query from the input of users.
 
 Pretrain bert with text-classification task and traditional masked word prediction task. In this way, text embedding with knowledge level augmentation can be derived from the specificly designed BERT.
 
