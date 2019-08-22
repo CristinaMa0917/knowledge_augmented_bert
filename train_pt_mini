@@ -1,0 +1,19 @@
+rm text_bert_pretrain.tar.gz
+tar -czf text_bert_pretrain.tar.gz ./configs ./data_dumper ./data_loader ./main ./model ./trainer ./util ./resources
+
+CHECKPOINT_PATH=text_bert_pretrain/mini_bert_pretrain
+TABLE=qcls_data_2_rand
+warm_start_step=0
+
+echo "Checkpoint : ${CHECKPOINT_PATH} ; TABLE : ${TABLE}"
+odpscmd -e "use college_corp_dev;pai \
+        -name tensorflow180 -project algo_public_dev \
+        -Dscript=\"file://`pwd`/text_bert_pretrain.tar.gz\" \
+        -Dtables=\"odps://college_corp_dev/tables/${TABLE}\" \
+        -DentryFile=\"main/pretrain.py\" \
+        -Dbuckets=\"oss://one-graph/?host=cn-zhangjiakou.oss-internal.aliyun-inc.com\&role_arn=acs:ram::1459115138698067:role/manxiu\" \
+        -DuserDefinedParameters='--checkpoint_dir=manxiu/models/$CHECKPOINT_PATH --warm_start_step=$warm_start_step' \
+        "
+
+
+
