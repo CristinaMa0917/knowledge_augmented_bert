@@ -18,7 +18,7 @@ class BertPretrain:
         weights = tf.cast(weights, tf.float32)
         equals = tf.cast(tf.equal(tf.cast(predictions, tf.int32), labels), tf.float32)
         numerator = tf.reduce_sum(weights*equals)
-        denominator = tf.reduce_sum(weights)
+        denominator = tf.reduce_sum(weights) + 1e-32
         acc = numerator/denominator
         return acc*100.
 
@@ -73,6 +73,8 @@ class BertPretrain:
 
         is_training = (mode == tf.estimator.ModeKeys.TRAIN)
         print('********************* is training : ',is_training)
+        if is_training:
+            assert (self.config["init_checkpoint"] is not False)
 
         model = bert_base.BertModel(
             config=bert_config,
@@ -89,9 +91,10 @@ class BertPretrain:
 
         (next_sentence_loss, next_sentence_example_loss,next_sentence_log_probs) =\
             get_cate_prediction_output(
-            bert_config, model.get_pooled_output(), next_sentence_labels)
+            bert_config, model.get_sequence_output(), input_mask, next_sentence_labels)
 
-        total_loss = masked_lm_loss + next_sentence_loss
+        # only masked_lm_loss
+        total_loss = masked_lm_loss + 2*next_sentence_loss
 
         eval_metrics = self._metric_fn(masked_lm_example_loss, masked_lm_log_probs, masked_lm_ids,
                                        masked_lm_weights, next_sentence_example_loss,
@@ -116,9 +119,8 @@ class BertPretrain:
 
         output_spec = None
         if mode == tf.estimator.ModeKeys.TRAIN:
-            train_op = optimization.create_optimizer(
-                total_loss, bert_config["learning_rate"], bert_config["num_train_steps"],
-                bert_config["num_warmup_steps"], bert_config["use_tpu"])
+            optimizer = tf.train.AdamOptimizer(learning_rate=bert_config["learning_rate"])
+            train_op = optimizer.minimize(total_loss, global_step=tf.train.get_global_step())
 
             output_spec = tf.estimator.EstimatorSpec(
                 mode=mode,
@@ -130,9 +132,9 @@ class BertPretrain:
                         "loss": total_loss,
                         "step": tf.train.get_global_step(),
                         "masked_lm_acc": eval_metrics["masked_lm_accuracy"],
-                        "masked_lm_loss" : eval_metrics["masked_lm_loss"],
-                        "next_sentence_acc" : eval_metrics["next_sentence_accuracy"],
-                        "next_sentence_loss" : eval_metrics["next_sentence_loss"]
+                        "masked_lm_loss" : masked_lm_loss,
+                        "cate_pred_acc" : eval_metrics["next_sentence_accuracy"],
+                        "cate_pred_loss" : next_sentence_loss
                     },
                     every_n_iter=100
                 )
@@ -180,7 +182,7 @@ def get_masked_lm_output(bert_config, input_tensor, output_weights, positions,
         initializer=tf.zeros_initializer())
     logits = tf.matmul(input_tensor, output_weights, transpose_b=True)
     logits = tf.nn.bias_add(logits, output_bias)
-    log_probs = tf.nn.log_softmax(logits, dim=-1)
+    log_probs = tf.nn.log_softmax(logits, dim=-1) + 1e-32
     label_ids = tf.reshape(label_ids, [-1])
 
     label_weights = tf.cast(label_weights, dtype=tf.float32)
@@ -210,8 +212,7 @@ def get_next_sentence_output(bert_config, input_tensor, labels):
         "output_weights",
         shape=[2, bert_config["hidden_size"]],
         initializer=bert_base.create_initializer(bert_config["initializer_range"]))
-    output_bias = tf.get_variable(
-        "output_bias", shape=[2], initializer=tf.zeros_initializer())
+    output_bias = tf.get_variable("output_bias", shape=[2], initializer=tf.zeros_initializer())
 
     logits = tf.matmul(input_tensor, output_weights, transpose_b=True)
     logits = tf.nn.bias_add(logits, output_bias)
@@ -223,13 +224,11 @@ def get_next_sentence_output(bert_config, input_tensor, labels):
 
     return (loss, per_example_loss, log_probs)
 
-def get_cate_prediction_output(bert_config, input_tensor, labels):
+def get_cate_prediction_output(bert_config, input_tensor, input_mask, labels):
     with tf.variable_scope("cls/seq_relationship"):
-        input_tensor = tf.layers.dense(
-            input_tensor,
-            units=bert_config["hidden_size"],
-            activation=bert_base.get_activation(bert_config["hidden_act"]),
-            kernel_initializer=bert_base.create_initializer(bert_config["initializer_range"]))
+        input_tensor = ave_pooling(input_tensor, tf.cast(input_mask,tf.float32))  # [b,e]
+        # add one layer of dense for cate prediction
+        input_tensor = tf.contrib.layers.fully_connected(input_tensor, num_outputs=bert_config["hidden_size"], activation_fn=tf.nn.relu)
         input_tensor = bert_base.layer_norm(input_tensor)
 
         output_weights = tf.get_variable(
@@ -264,3 +263,11 @@ def gather_indexes(sequence_tensor, positions):
                                     [batch_size * seq_length, width])
   output_tensor = tf.gather(flat_sequence_tensor, flat_positions)
   return output_tensor
+
+def ave_pooling(embeddings, masks):
+    # batch * length * 1
+    multiplier = tf.expand_dims(masks, axis=-1)
+    embeddings_sum = tf.reduce_sum(tf.multiply(multiplier, embeddings),axis=1)
+    length = tf.expand_dims(tf.maximum(tf.reduce_sum(masks, axis=1), 1.0), axis=-1) + 1e-32
+    embedding_avg = embeddings_sum / length
+    return embedding_avg

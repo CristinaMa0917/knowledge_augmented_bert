@@ -52,20 +52,20 @@ class OdpsDataLoader:
 
             return dataset.make_one_shot_iterator().get_next()
 
-    def _test_parse_data(self, oneid, input_ids):
+    def _test_parse_data(self, oneid, label, input_ids):
         with tf.device("/cpu:0"):
             input_ids_list,input_mask = self._text_content_parser(input_ids, self._max_sum_length)
 
         return {"oneid": oneid,
                 "input_ids_list":input_ids_list,
                 "input_mask":input_mask,
-                }, tf.constant(0, dtype=tf.int32)
+                }, label
 
     def _test_data_fn(self):
         with tf.name_scope('data_loader'):
             dataset = tf.data.TableRecordDataset(self._table_name,
-                                                 record_defaults=["", ""],
-                                                 selected_cols='oneid, content',
+                                                 record_defaults=["", 0, ""],
+                                                 selected_cols='oneid, label, content',
                                                  slice_id=self._slice_id,
                                                  slice_count=self._slice_count
                                                  )

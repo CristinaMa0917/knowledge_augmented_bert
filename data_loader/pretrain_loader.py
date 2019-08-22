@@ -19,11 +19,22 @@ class OdpsDataLoader:
         return tf.string_to_number(word_strs.values, out_type=tf.int32)[:max_length] + (1 if shift_no else 0), \
                tf.ones([tf.minimum(tf.shape(word_strs)[-1], max_length)] , dtype = tf.int32)
 
+    def _text_content_parser_clip(self, text, max_length, clip_len, shift_no=True):
+        word_strs = tf.string_split([text], " ")
+        word_val = tf.string_to_number(word_strs.values, out_type=tf.int32)[:max_length] + (1 if shift_no else 0)
+
+        # to avoid the masked word index is bigger than the max sequence length
+        clip = tf.cast(tf.less(word_val, clip_len), dtype=tf.int32)
+        word_val = tf.multiply(word_val, clip)
+        return word_val, clip
+
     def _train_parse_data(self, qid, input_ids, masked_pos, masked_ids, labels):
         with tf.device("/cpu:0"):
             input_ids_list, input_mask = self._text_content_parser(input_ids, self._max_seq_length)
-            masked_lm_ids,masked_lm_weights = self._text_content_parser(masked_ids, self._max_predictions_per_seq)
-            masked_lm_positions = tf.string_to_number(tf.string_split([masked_pos], " ").values, out_type = tf.int32)
+            masked_lm_ids  ,_ = self._text_content_parser(masked_ids,self._max_predictions_per_seq)
+            masked_lm_positions , masked_lm_weights = self._text_content_parser_clip(masked_pos,
+                                                                                    self._max_predictions_per_seq,
+                                                                                    self._max_seq_length, shift_no=False)
             segment_ids_list = tf.zeros([self._max_seq_length], dtype=tf.int32)
 
         return {
@@ -45,7 +56,8 @@ class OdpsDataLoader:
                 slice_id=self._slice_id,
                 slice_count=self._slice_count
                 )
-            dataset = dataset.map(map_func=self._train_parse_data, num_parallel_calls=8)
+            dataset = dataset.map(map_func=self._train_parse_data, num_parallel_calls=4)
+            dataset = dataset.repeat(None)
             dataset= dataset.prefetch(40000)
             dataset = dataset.shuffle(500)
             dataset = dataset.padded_batch(
@@ -62,7 +74,7 @@ class OdpsDataLoader:
                     }, [])
             )
 
-            return dataset.make_one_shot_iterator().get_next()
+            return dataset
 
     def _test_parse_data(self, qid, input_ids):
         with tf.device("/cpu:0"):
@@ -85,7 +97,8 @@ class OdpsDataLoader:
                                                  )
             # print(self.mode, self.selected_cols)
             # create a parallel parsing function based on number of cpu cores
-            dataset = dataset.map(map_func=self._test_parse_data, num_parallel_calls=8)
+            dataset = dataset.map(map_func=self._test_parse_data, num_parallel_calls=4)
+            dataset = dataset.repeat(None)
             dataset = dataset.shuffle(500)
             dataset = dataset.padded_batch(
                 self._batch_size,
@@ -100,7 +113,7 @@ class OdpsDataLoader:
                     }, [])
             )
 
-            return dataset.make_one_shot_iterator().get_next()
+            return dataset
 
     def input_fn(self):
         return self._train_data_fn() if self._mode else self._test_data_fn()

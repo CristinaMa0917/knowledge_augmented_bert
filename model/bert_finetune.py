@@ -46,18 +46,14 @@ class BertFinetune:
             input_mask=input_mask,
             use_one_hot_embeddings=self.bert_config["use_one_hot_embeddings"])
 
-        if self.output_emb == "get_sequence_output":
-            output_emb = model.get_sequence_output()[:, 1:, :] # [b*q, s, h]
-            word_emb = max_pooling(output_emb, input_mask[:,1:])  # [b*q, h]
-            word_emb = tf.reshape(word_emb, [-1, self.max_que_len, self.bert_config["hidden_size"]])  # [b,q,h]
-            values = max_pooling(word_emb, pooled_mask)  # [b,h]
-        elif self.output_emb == "get_pooled_output":
-            output_emb = model.get_pooled_output()  # [b*q, h]
-            output_emb = tf.reshape(output_emb, [-1, self.max_que_len, self.bert_config["hidden_size"]])  # [b,q,h]
-            values = max_pooling(output_emb, pooled_mask)
-        else:
-            raise ValueError("Not implemented output emb type")
-
+        output_emb = model.get_sequence_output()  # [b*q, s, h]
+        # unify tasks don't need
+        # output_emb = output_emb[:, 1:, :]  # [b*q, s-1, h]
+        # input_mask = input_mask[:, 1:]  # [b*q, s-1]
+        word_emb = max_pooling(output_emb, input_mask)  # [b*q, h]
+        word_emb = tf.reshape(word_emb, [-1, self.max_que_len, self.bert_config["hidden_size"]])  # [b, q, h]
+        word_emb = tf.contrib.layers.fully_connected(word_emb, num_outputs=self.bert_config["hidden_size"], activation_fn=tf.nn.relu)
+        values = max_pooling(word_emb, pooled_mask)  # [b,h]
 
         for i, n_units in enumerate(self.layers_num, 1):
             with tf.variable_scope("MlpLayer-%d" % i) as hidden_layer_scope:
@@ -107,9 +103,8 @@ class BertFinetune:
     def _train(self, outputs, labels):
         prediction = outputs["prediction"]
         loss = outputs["loss"]
-        train_op = optimization.create_optimizer(
-            loss , self.bert_config["learning_rate"], self.bert_config["num_train_steps"],
-            self.bert_config["num_warmup_steps"], self.bert_config["use_tpu"])
+        optimizer = tf.train.AdamOptimizer(learning_rate=self.bert_config["learning_rate"])
+        train_op = optimizer.minimize(loss, global_step=tf.train.get_global_step())
 
         output_spec = tf.estimator.EstimatorSpec(
             mode=tf.estimator.ModeKeys.TRAIN,

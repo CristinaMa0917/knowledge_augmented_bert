@@ -10,6 +10,7 @@ from util import env
 from util import helper
 from util.config import set_dist_env, parse_config
 from model.bert_pretrain import BertPretrain
+from tensorflow.contrib.distribute.python import cross_tower_ops as cross_tower_ops_lib
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -17,13 +18,14 @@ def parse_args():
     parser.add_argument("--buckets", type=str, help="Worker task index")
     parser.add_argument("--snap_shot", type=int, default=10000)
     parser.add_argument("--checkpoint_dir", type=str)
-    parser.add_argument("--warm_start_step", type = int, default=0, help="0: not warm_start , 1: ")
+    parser.add_argument("--warm_start_up", type = int, help="0: not warm_start , 1: warm_start_from_checkpoint")
     return parser.parse_known_args()[0]
 
 
 def main():
     # bert 参数初始化
     config = parse_config('MiniBERT')
+    config["learning_rate"] = 1e-3
 
     # Parse arguments and print them
     args = parse_args()
@@ -33,37 +35,50 @@ def main():
 
     # Check if the model has already exisited
     model_save_dir = args.buckets + args.checkpoint_dir
-    warm_start_settings = None
-    if tf.gfile.Exists(model_save_dir + "/checkpoint") and not args.warm_start_step:
+    warm_start_dir = None
+    if tf.gfile.Exists(model_save_dir + "/checkpoint") and not args.warm_start_up:
         raise ValueError("Model %s has already existed, please delete them and retry" % model_save_dir)
-    elif args.warm_start_step:
-        warm_start_path = model_save_dir + "/model.ckpt-{}".format(args.warm_start_step)
-        warm_start_settings = tf.estimator.WarmStartSettings(warm_start_path)
-        print("Model init training from %s" % warm_start_path)
+    elif tf.gfile.Exists(model_save_dir + "/checkpoint") and args.warm_start_up :
+        print("Model warm start up from %s" % model_save_dir)
+        warm_start_dir = model_save_dir
     else:
-        pass
+        print("Model init training")
 
     helper.dump_args(model_save_dir, args)
+
     bert_model = BertPretrain(config)
+
+    cross_tower_ops = cross_tower_ops_lib.AllReduceCrossTowerOps('nccl')
+    distribution = tf.contrib.distribute.MirroredStrategy(
+        num_gpus=4, cross_tower_ops=cross_tower_ops,
+        all_dense=True
+    )
 
     estimator = tf.estimator.Estimator(
         model_fn=bert_model.model_fn,
         model_dir=model_save_dir,
         config=tf.estimator.RunConfig(
-            session_config=tf.ConfigProto(gpu_options=tf.GPUOptions(allow_growth=True)),
+            session_config=tf.ConfigProto(
+                gpu_options=tf.GPUOptions(allow_growth=True),
+                allow_soft_placement=True),
             save_checkpoints_steps=args.snap_shot,
-            keep_checkpoint_max=100
+            keep_checkpoint_max=100,
+            train_distribute=distribution
         ),
-        warm_start_from=warm_start_settings
+        warm_start_from = warm_start_dir,
     )
 
     print("Start training......")
-    estimator.train(
-        pretrain_loader.OdpsDataLoader(
-            table_name = args.tables,
-            config = config,
-            mode = 1).input_fn,
-        steps=config["num_train_steps"],
+    tf.estimator.train(
+        estimator,
+        train_spec=tf.estimator.TrainSpec(
+            input_fn=pretrain_loader.OdpsDataLoader(
+                table_name=args.tables,
+                mode=1,
+                config=config
+            ).input_fn,
+            max_steps=config["num_train_steps"]
+        )
     )
 
 if __name__ == '__main__':

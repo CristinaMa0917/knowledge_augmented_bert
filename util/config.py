@@ -4,7 +4,7 @@ import json
 import os
 
 optimizer = ["Adagrad", "Adam", "Ftrl", "Momentum", "RMSProp", "SGD"]
-task_type = ["train", "predict", "eval", "export"]
+task_type = ["pretrain", "predict", "eval", "export"]
 
 
 def parse_config(model, json_file='configs/HyperParameters.json'):
@@ -69,7 +69,7 @@ def set_dist_env(dist_params):
 
         return len(worker_hosts) + 1, dist_params['task_index']
 
-    elif dist_params['dist_mode'] and dist_params['task_type'] == 'train':
+    elif dist_params['dist_mode'] and dist_params['task_type'] == 'pretrain':
         # 集群训练模式: 1 chief, 1 ps, 1 evaluator, n worker
         ps_hosts = dist_params['ps_hosts'].split(',')
         worker_hosts = dist_params['worker_hosts'].split(',')

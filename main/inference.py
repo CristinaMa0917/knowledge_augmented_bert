@@ -38,7 +38,7 @@ def _do_prediction(result_iter, writer, args, model_args):
     def _feature_extractor(prediction, record):
         record.append(prediction["output_embedding"])
 
-    print("Start inference......")
+    print("Start inference_2......")
     t_start = t_batch_start = time.time()
     report_gap = 10000
     transformers = []
@@ -69,14 +69,14 @@ def _do_prediction(result_iter, writer, args, model_args):
 
 def main():
     # bert 参数初始化
-    config = parse_config('BERT')
+    config = parse_config('MiniBERT')
 
     args = parse_args()
     print("Main arguments:")
     for k, v in args.__dict__.items():
         print("{}={}".format(k, v))
 
-    # Setup distributed inference
+    # Setup distributed inference_2
     dist_params = {
         "task_index": args.task_index,
         "ps_hosts": args.ps_hosts,
