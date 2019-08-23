@@ -14,3 +14,10 @@ The finetune preprocess is shown as follows.
 Through multiple comparisons, Unified Text encoding from BERT (UTEB) is better than Parallel Text encoding from BERT(PTEB). Besides UTEB shows faster convergence and higher accuracy than TextCNN.
 
 ![image](https://github.com/CristinaMa0917/knowledge_augmentation_bert/blob/unify_task/images/img3.png)
+
+
+
+Tips:
+1. Set different learning rate for the params of BERT and other params. This makes a big difference.
+2. The original designed optimizer needs more specificly-finetuned hyper parameters. It's better to replace it with normal Adam.
+3. BERT is not so workful for short text.
